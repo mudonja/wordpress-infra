@@ -1,0 +1,119 @@
+#name: kp-wordpress-interview
+services:
+### PERCONA MYSQL DATABASE
+  # MASTER
+  database-master:
+    image: percona:8
+    container_name: master-db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    networks:
+      - web-app-net
+    ports:
+      - 3307:3306
+    volumes:
+      - database-storage:/var/lib/mysql
+      - ./db_conf/master/master_config.cnf:/etc/my.cnf.d/docker.cnf:ro
+      - ./db_conf/master/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+  # SLAVE  
+  database-slave:
+    image: percona:8
+    container_name: slave-db
+    depends_on:
+      - database-master
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    networks:
+      - web-app-net
+    ports:
+      - 3308:3306
+    volumes:
+      - database-backup-storage:/var/lib/mysql
+      - ./db_conf/slave/slave_config.cnf:/etc/my.cnf.d/docker.cnf:ro
+      - ./db_conf/slave/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+### WORDPRESS APPLICATION
+  application:
+    image: wordpress
+    restart: always
+    networks:
+      - web-app-net
+    environment:
+      WORDPRESS_DB_HOST: ${WORDPRESS_DB_HOST}
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
+      WORDPRESS_DB_USER: ${MYSQL_USER}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - ./wordpress:/var/www/html
+    deploy:
+      replicas: 2
+    depends_on:
+      - database-master
+      - database-slave 
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+### NGINX LOAD BALANCER
+  load-balancer:
+    image: nginx:stable-alpine
+    container_name: nginx-lb
+    restart: always
+    ports:
+      - 8080:80
+    networks:
+      - web-app-net
+    volumes:
+      - ./load_balancing/nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - application
+###DATABASE LOAD BALANCER
+  proxysql:
+    image: proxysql/proxysql
+    container_name: database-lb
+    ports:
+      - "6033:6033"
+      - "6032:6032"
+    networks:
+      - web-app-net
+    volumes:
+      - ./load_balancing/proxysql.cnf:/etc/proxysql.cnf
+    depends_on:
+      - database-master
+      - database-slave
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-P6033", "-u", "user1", "-pPassword123!"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  web-app-net:
+    driver: bridge
+
+volumes:
+  application-storage:
+  database-storage:
+  database-backup-storage:

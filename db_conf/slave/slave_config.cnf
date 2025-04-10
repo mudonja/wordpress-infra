@@ -1,0 +1,10 @@
+[mysqld]
+host_cache_size=0
+skip-name-resolve
+log-bin=mysql-bin
+binlog_format=ROW
+server_id=2
+read_only=ON
+gtid_mode=ON
+enforce-gtid-consistency=ON
+log_replica_updates=ON
